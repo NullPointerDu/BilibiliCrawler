@@ -13,7 +13,7 @@ class ConnectionError(Exception):
         self.msg = msg
 
 
-class BiliBili:
+class Bilibili:
     def __init__(self, url, ua=None, cookies={}):
         self.url = url
         if ua:
@@ -200,6 +200,5 @@ class BiliBili:
 
 
 if __name__ == "__main__":
-    b = BiliBili(input("Please enter url: "))
+    b = Bilibili(input("Please enter url: "))
     b.download(quality_num=int(input("Please enter quality num: ")))
-
