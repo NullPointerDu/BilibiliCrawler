@@ -5,6 +5,7 @@ import time
 import json
 from moviepy.editor import *
 from selenium import webdriver
+import platform
 
 
 class PathException(Exception):
@@ -29,7 +30,15 @@ class Bilibili:
 
     @staticmethod
     def login():
-        browser = webdriver.Chrome(executable_path="./chromedriver")
+        system = platform.system()
+        executable = None
+        if system == 'Windows':
+            executable = "./chromedriver_win.exe"
+        elif system == 'Linux':
+            executable = "./chromedriver_linux"
+        elif system == 'Darwin':
+            executable = "./chromedriver_darwin"
+        browser = webdriver.Chrome(executable_path=executable)
         browser.get("https://passport.bilibili.com/login")
         while True:
             time.sleep(3)
@@ -126,25 +135,27 @@ class Bilibili:
         shutil.rmtree(base_dir)
 
     @staticmethod
-    def pack_files_as_directory(self, target_dir, src_name, new_name):
+    def pack_files_as_directory(target_dir, src_name, new_name):
         if os.path.isdir(os.path.join(target_dir, new_name)):
             shutil.rmtree(os.path.join(target_dir, new_name))
         os.rename(os.path.join(target_dir, src_name), os.path.join(target_dir, new_name))
 
-    def print_quality_options(self):
-        self.log("Quality num options:\n"
+    @staticmethod
+    def print_options():
+        Bilibili.log("Quality num options:\n"
                 "112: '高清 1080P+' (Login Required, Membership Required)\n"
                  "80: '高清 1080P' (Login Required)\n"
                  "64: '高清 720P' (Login Required)\n"
                  "32: '清晰 480P'\n"
                  "16: '流畅 360P'")
 
-    def get_ext(self, format):
+    @staticmethod
+    def get_ext(format):
         type = ['mp4', 'flv']
         for i in type:
             if format.find(i) != -1:
                 return i
-        self.log("Unknown File Type: " + format)
+        Bilibili.log("Unknown File Type: " + format)
         return "flv"
 
     def get_cookies(self):
@@ -166,12 +177,22 @@ class Bilibili:
             f.write(json.dumps(valid_cookies_list))
         self.cookies = valid_cookies_list[0]
 
-    def download(self, dirpath=".", filename_in=None, quality_num=112, chuck_size=5000000, concatenate=True):
+    def download(self, dirpath=".", filename_in=None, quality_num=112, episode=None, chuck_size=5000000, concatenate=True):
         if not os.path.isdir(dirpath):
             raise PathException("Save Error: " + dirpath + " is not a Directory.")
         if quality_num >= 64 and not self.cookies:
             self.get_cookies()
-        for i in self.get_page_info():
+        page_info = []
+        if episode:
+            index = 1
+            for i in self.get_page_info():
+                if index in episode:
+                    page_info.append(i)
+                index += 1
+        else:
+            page_info = self.get_page_info()
+
+        for i in page_info:
             temp_dir = os.path.join(dirpath, ".download")
             if os.path.isdir(temp_dir):
                 shutil.rmtree(temp_dir)
@@ -244,6 +265,6 @@ class Bilibili:
 
 
 if __name__ == "__main__":
-    b = Bilibili(input("Please enter URL: "))
-    b.print_quality_options()
-    b.download(quality_num=int(input("Please enter quality num: ")))
+    b = Bilibili("https://www.bilibili.com/video/av33516494")
+    # b.print_options()
+    b.download(episode=[1, 5])
