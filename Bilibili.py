@@ -1,6 +1,10 @@
 import requests
-import re, shutil
+import re
+import shutil
+import time
+import json
 from moviepy.editor import *
+from selenium import webdriver
 
 
 class PathException(Exception):
@@ -14,7 +18,7 @@ class ConnectionError(Exception):
 
 
 class Bilibili:
-    def __init__(self, url, ua=None, cookies={}):
+    def __init__(self, url, ua=None, cookies=None):
         self.url = url
         if ua:
             self.ua = ua
@@ -23,7 +27,20 @@ class Bilibili:
                       "like Gecko) Chrome/76.0.3809.87 Safari/537.36"
         self.cookies = cookies
 
-    def log(self, msg):
+    @staticmethod
+    def login():
+        browser = webdriver.Chrome(executable_path="./chromedriver")
+        browser.get("https://passport.bilibili.com/login")
+        while True:
+            time.sleep(3)
+            for i in browser.get_cookies():
+                if i["name"] == "SESSDATA":
+                    cookie = {"SESSDATA": i["value"]}
+                    browser.close()
+                    return cookie
+
+    @staticmethod
+    def log(msg):
         print(msg)
 
     def get_page_info(self):
@@ -43,7 +60,7 @@ class Bilibili:
             info.append({"aid": aid, "cid": i["cid"], "title": title, "part": i["part"]})
         return info
 
-    def get_download_info(self, info, quality_num=112):
+    def get_download_info(self, info, quality_num=112, cookies=None):
         url = "https://api.bilibili.com/x/player/playurl"
         params = {
             "avid": info.get("aid"),
@@ -60,7 +77,9 @@ class Bilibili:
             "Sec-Fetch-Mode": "cors",
             "User-Agent": self.ua
         }
-        json = requests.get(url, params=params, headers=headers, cookies=self.cookies).json()
+        if not cookies:
+            cookies = self.cookies
+        json = requests.get(url, params=params, headers=headers, cookies=cookies).json()
         durl = json['data']['durl']
         quality = json['data']['quality']
         quality_options = json['data']['accept_quality']
@@ -85,35 +104,40 @@ class Bilibili:
         size_info = req.headers.get("Content-Range")
         return req.content, size_info
 
-    def move_file(self, srcfile, dstfile):
+    @staticmethod
+    def move_file(srcfile, dstfile):
         if os.path.isfile(srcfile):
             if os.path.isfile(dstfile):
                 os.remove(dstfile)
             shutil.move(srcfile, dstfile)
 
-    def concatenate_clips(self, base_dir, clips_list, target_dir, filename, ext):
-        # target_file_path = os.path.join(target_dir, filename)
-        # clips_path_list = []
-        # for clip in clips_list:
-        #     clip_path = os.path.join(base_dir, clip)
-        #     video = VideoFileClip(clip_path)
-        #     clips_path_list.append(video)
-        # final_clip = concatenate_videoclips(clips_path_list)
-        # final_clip.to_videofile(target_file_path, fps=24, remove_temp=False, codec="copy")
-
-        for clip in clips_list:
-            clip_path = os.path.join(base_dir, clip)
-            order = clip.split(".")[0]
-            # filename_list = filename.split(".")
-            # name = filename_list[0]
-            # ext = "." + filename_list[1]
-            self.move_file(clip_path, os.path.join(target_dir, filename + "_" + order + ext))
+    @staticmethod
+    def concatenate_clips(base_dir, clips_list, target_dir, filename, ext=".mp4"):
+        path_list = []
+        video_path = os.path.join(target_dir, filename + ext)
+        if os.path.isfile(video_path):
+            os.remove(video_path)
+        for file in clips_list:
+            path = os.path.join(base_dir, file)
+            video = VideoFileClip(path)
+            path_list.append(video)
+        final_clip = concatenate_videoclips(path_list)
+        final_clip.to_videofile(video_path, remove_temp=True, codec="h264")
         shutil.rmtree(base_dir)
 
+    @staticmethod
     def pack_files_as_directory(self, target_dir, src_name, new_name):
         if os.path.isdir(os.path.join(target_dir, new_name)):
             shutil.rmtree(os.path.join(target_dir, new_name))
         os.rename(os.path.join(target_dir, src_name), os.path.join(target_dir, new_name))
+
+    def print_quality_options(self):
+        self.log("Quality num options:\n"
+                "112: '高清 1080P+' (Login Required, Membership Required)\n"
+                 "80: '高清 1080P' (Login Required)\n"
+                 "64: '高清 720P' (Login Required)\n"
+                 "32: '清晰 480P'\n"
+                 "16: '流畅 360P'")
 
     def get_ext(self, format):
         type = ['mp4', 'flv']
@@ -123,10 +147,30 @@ class Bilibili:
         self.log("Unknown File Type: " + format)
         return "flv"
 
+    def get_cookies(self):
+        valid_cookies_list = []
+        if os.path.isfile("./cookies.json"):
+            with open("./cookies.json", "r") as f:
+                json_str = f.read()
+            json_obj = json.loads(json_str)
+            for cookie in json_obj:
+                quality = int(self.get_download_info(self.get_page_info()[0],
+                                              quality_num=112, cookies=cookie)[0][0]['quality'])
+                if quality > 32:
+                    valid_cookies_list.append(cookie)
+            if not valid_cookies_list:
+                valid_cookies_list.append(self.login())
+        else:
+            valid_cookies_list.append(self.login())
+        with open("./cookies.json", "w") as f:
+            f.write(json.dumps(valid_cookies_list))
+        self.cookies = valid_cookies_list[0]
+
     def download(self, dirpath=".", filename_in=None, quality_num=112, chuck_size=5000000, concatenate=True):
         if not os.path.isdir(dirpath):
             raise PathException("Save Error: " + dirpath + " is not a Directory.")
-        # ext = ".flv"
+        if quality_num >= 64 and not self.cookies:
+            self.get_cookies()
         for i in self.get_page_info():
             temp_dir = os.path.join(dirpath, ".download")
             if os.path.isdir(temp_dir):
@@ -193,12 +237,13 @@ class Bilibili:
             # concatenate clips
             file_list.sort()
             if concatenate:
-                self.concatenate_clips(temp_dir, file_list, dirpath, filename, ext)
+                self.concatenate_clips(temp_dir, file_list, dirpath, filename, ".mp4")
             else:
                 self.pack_files_as_directory(dirpath, ".download", filename)
         self.log("Done!")
 
 
 if __name__ == "__main__":
-    b = Bilibili(input("Please enter url: "))
+    b = Bilibili(input("Please enter URL: "))
+    b.print_quality_options()
     b.download(quality_num=int(input("Please enter quality num: ")))
